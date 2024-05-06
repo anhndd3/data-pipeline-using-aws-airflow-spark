@@ -15,8 +15,9 @@ TRY_LOOP="20"
 # Defaults and back-compat
 : ${AIRFLOW_HOME:="/usr/local/airflow"}
 : ${AIRFLOW__CORE__FERNET_KEY:=${FERNET_KEY:=$(python -c "from cryptography.fernet import Fernet; FERNET_KEY = Fernet.generate_key().decode(); print(FERNET_KEY)")}}
-: ${AIRFLOW__CORE__EXECUTOR:=${EXECUTOR:-Sequential}Executor}
-: ${AIRFLOW_LOAD_EXAMPLES:=False}
+# : ${AIRFLOW__CORE__FERNET_KEY:=${FERNET_KEY:=""}}
+: ${AIRFLOW__CORE__EXECUTOR:=${EXECUTOR:-Celery}Executor}
+: ${LOAD_EX:="y"}
 : ${AIRFLOW_ROLE:="Admin"}
 : ${AIRFLOW_USERNAME:="admin"}
 : ${AIRFLOW_PASSWORD:="admin"}
@@ -31,7 +32,7 @@ AIRFLOW__CELERY__RESULT_BACKEND \
 AIRFLOW__CORE__EXECUTOR \
 AIRFLOW__CORE__FERNET_KEY \
 AIRFLOW__CORE__LOAD_EXAMPLES \
-AIRFLOW__DATEBASE__SQL_ALCHEMY_CONN \
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN \
 
 wait_for_port() {
     local name="$1" host="$2" port="$3"
@@ -47,14 +48,13 @@ wait_for_port() {
     done
 }
 
-AIRFLOW__DATEBASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
+AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 AIRFLOW__CELERY__RESULT_BACKEND="db+postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 wait_for_port "Postgres" "$POSTGRES_HOST" "$POSTGRES_PORT"
 
-# Load DAGs exemples (default: Yes)
-if [[ -z $AIRFLOW__CORE__LOAD_EXAMPLES ]] && [[ $AIRFLOW_LOAD_EXAMPLES == False || $AIRFLOW_LOAD_EXAMPLES == True]]
+if [[ -z "$AIRFLOW__CORE__LOAD_EXAMPLES" && "${LOAD_EX:=n}" == n ]]
 then
-    AIRFLOW__CORE__LOAD_EXAMPLES=$AIRFLOW_LOAD_EXAMPLES
+    AIRFLOW__CORE__LOAD_EXAMPLES=False
 fi
 
 if [ -n $REDIS_PASSWORD ]; then
@@ -69,6 +69,7 @@ wait_for_port "Redis" "$REDIS_HOST" "$REDIS_PORT"
 case "$1" in
     webserver)
         airflow db init
+        sleep 5
         airflow users create \
         --username $AIRFLOW_USERNAME \
         --firstname $AIRFLOW_FIRSTNAME \

@@ -1,0 +1,13 @@
+apache-airflow[celery,spark,postgres,crypto,docker,postgres]==2.6.2 --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.6.2/constraints-3.10.txt"
+apache-airflow-providers-amazon==8.7.0
+boto3==1.28.50
+pytz==2023.3 
+pyOpenSSL==23.1.1
+ndg-httpsclient==0.5.1
+pyasn1==0.5.0
+flask-bcrypt==1.0.1
+redis==4.5.5
+statsd==3.3.0
+pytest==7.4.2
+pydantic==1.10.10
+pendulum<3

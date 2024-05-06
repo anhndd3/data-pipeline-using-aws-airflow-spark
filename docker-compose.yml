@@ -1,0 +1,188 @@
+version: "3"
+
+x-common-airflow: &airflow-common # user: 0:0
+  build: ./docker/airflow
+  # restart: always
+
+x-common-airflow-variables: &airflow-variables
+  environment:
+    - AIRFLOW_ROLE=${AIRFLOW_ROLE:-Admin}
+    - AIRFLOW_USERNAME=${AIRFLOW_USERNAME:-admin}
+    - AIRFLOW_PASSWORD=${AIRFLOW_PASSWORD:-admin}
+    - AIRFLOW_FIRSTNAME=${AIRFLOW_FIRSTNAME:-admin}
+    - AIRFLOW_LASTNAME=${AIRFLOW_LASTNAME:-admin}
+    - AIRFLOW_EMAIL=${AIRFLOW_EMAIL:-admin@airflow.com}
+    - LOAD_EX=${LOAD_EX:-n}
+    - FERNET_KEY=${FERNET_KEY:-TqzPmn8i3MlALa4pX0nNW1G7bzsaoj40dVrkaTz-iHE=}
+    - EXECUTOR=${EXECUTOR:-Celery}
+    - POSTGRES_USER=${POSTGRES_USER:-airflow}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-airflow}
+    - POSTGRES_DB=${POSTGRES_DB:-airflow}
+    - REDIS_PASSWORD=${AIRFLOW_REDIS_PASSWORD:-redispass}
+    - PYTHONPATH=${PYTHONPATH:-/usr/local/airflow/include}
+
+x-common-airflow-volumes: &airflow-volumes
+  volumes:
+    - ./src/dags:/usr/local/airflow/dags
+    - ./src/plugins:/usr/local/airflow/plugins
+    - ./src/include:/usr/local/airflow/include
+    - ./docker/airflow/config/airflow.cfg:/usr/local/airflow/airflow.cfg
+
+services:
+  # pgadmin:
+  #   user: 0:0
+  #   image: dpage/pgadmin4:latest
+  #   container_name: pgadmni
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@admin.com}
+  #     PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+  #     PGADMIN_CONFIG_SERVER_MODE: "False"
+  #   volumes:
+  #     - ./setup_database/pgadmin:/var/lib/pgadmin
+  #   ports:
+  #     - "${PGADMIN_PORT:-5050}:80"
+  #   restart: unless-stopped
+
+  # database:
+  #   image: postgres:13
+  #   container_name: database
+  #   environment:
+  #     - POSTGRES_USER=admin
+  #     - POSTGRES_PASSWORD=admin
+  #     - POSTGRES_DB=database
+  #   ports:
+  #     - "5433:5432"
+  #   volumes:
+  #     - ./setup_database/sql/create_database.sql:/docker-entrypoint-initdb.d/create_database.sql
+  #     - ./setup_database/data:/var/lib/postgresql/data
+  #   restart: always
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ./setup_database/metadata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:6.0.9-alpine
+    container_name: queue
+    command: redis-server --requirepass redispass
+
+  flower:
+    user: 0:0
+    build: ./docker/airflow
+    command: flower
+    container_name: flower
+    environment:
+      - EXECUTOR=Celery
+      - REDIS_PASSWORD=redispass
+    ports:
+      - 5555:5555
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  webserver:
+    <<: [*airflow-common, *airflow-variables, *airflow-volumes]
+    command: webserver
+    container_name: webserver
+    ports:
+      - 8080:8080
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /usr/local/airflow/airflow-webserver.pid ]"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      - postgres
+      - redis
+
+  scheduler:
+    <<: [*airflow-common, *airflow-variables, *airflow-volumes]
+    command: scheduler
+    container_name: scheduler1
+    depends_on:
+      - webserver
+    # scale: 2
+
+  scheduler1:
+    <<: [*airflow-common, *airflow-variables, *airflow-volumes]
+    command: scheduler # bash -c "airflow db upgrade && airflow scheduler"
+    container_name: scheduler2
+    depends_on:
+      - webserver
+
+  worker:
+    <<: [*airflow-common, *airflow-variables, *airflow-volumes]
+    container_name: worker
+    command: worker
+    depends_on:
+      - scheduler
+
+  # telegraf:
+  #   container_name: telegraf
+  #   image: telegraf:1.28.1
+  #   ports:
+  #     - 8125:8125/udp
+  #   restart: always
+  #   env_file:
+  #     - ./docker/telegraf/telegraf.env
+  #   volumes:
+  #     - ./docker/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf
+  #   depends_on:
+  #     - influxdb
+
+  # influxdb:
+  #   container_name: influxdb
+  #   image: influxdb:1.7.8
+  #   ports:
+  #     - 8083:8083
+  #     - 8086:8086
+
+  # statsd-exporter:
+  #   image: prom/statsd-exporter
+  #   volumes:
+  #     - ./docker/stastd/config.yaml:/home/config.yaml
+  #   entrypoint: ["/bin/sh", "-c", "--"]
+  #   command:
+  #     - "statsd_exporter"
+  #     - "--log.level=debug"
+  #     - "--statsd.mapping-config=/home/config.yaml"
+  #     - "--no-statsd.parse-dogstatsd-tags"
+  #     - "--no-statsd.parse-influxdb-tags"
+  #     - "--no-statsd.parse-librato-tags"
+  #     - "--no-statsd.parse-signalfx-tags"
+  #   ports:
+  #     - 9102:9102
+  #     - 9125:9125
+  #   restart: always
+
+  # prometheus:
+  #   image: prom/prometheus
+  #   volumes:
+  #     - ./docker/prometheus/config.yaml:/etc/prometheus/prometheus.yaml
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - "--config.file=/etc/prometheus/prometheus.yaml"
+  #     - "--storage.tsdb.path=/prometheus"
+  #     - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+  #     - "--web.console.templates=/usr/share/prometheus/consoles"
+  #   ports:
+  #     - 9090:9090
+  #   restart: always
+
+  # grafana:
+  #   container_name: grafana
+  #   image: grafana/grafana
+  #   ports:
+  #     - 3000:3000
+  #   volumes:
+  #     - ./docker/grafana/grafana.ini:/etc/grafana/grafana.ini
+
+volumes:
+  prometheus_data:
